@@ -1,0 +1,83 @@
+#!/usr/bin/perl -w 
+use v5.16;
+use strict;
+use Data::Dumper;
+use JSON::PP ;
+use LWP::UserAgent;
+
+use constant API=>'http://desktop:9091/transmission/rpc/';
+
+my $ua=LWP::UserAgent->new;
+$ua->timeout(10);
+
+my $tsid=$ua->get(API)->headers->header('x-transmission-session-id') or die "Can't connect transmission: $!";
+
+$ua->default_header('X-Transmission-Session-Id'=>$tsid);
+my $json=encode_json {
+	arguments=>{
+		fields=>[qw/id files/]
+	},
+	method=>"torrent-get"
+};
+my $response=$ua->post(API,Content=>$json);
+unless($response->is_success) {
+	die $response->status_line,$response->decoded_content;
+}
+my $obj=decode_json $response->decoded_content;
+die Dumper $obj unless $obj->{result} eq 'success';
+
+for my $torrent (@{$obj->{arguments}->{torrents}}){
+	for my $file(@{$torrent->{files}}){
+		tr_rename($file->{name},$torrent->{id});
+	}
+}
+sub replace{
+	local $_=$_[0];
+	s/\.([\w\d]{3,4}|tar\..{1,4})$// or m/()/;
+	my $ext=$1;
+	s/[\. \-,\(\)'’]/_/g;
+	s/(.+)_by_.+$/$1/ig;
+	s/(bd|web(.?dl)?|hd|hdtv|sat|dvd)_?rip//ig;
+	s/(720p|ELEKTRI4KA|hqclub|avo|mvo|dvd|mp4|web.?dl|dvb|x264|ac3|all.?films|xvid|lostfilm|avc|dual|rus|eng|(nnm.club|torrents|tfile)(\.ru)?|(rutracker|scarabey)(.org)?)//ig;
+	s/\[.*\]//g;
+	s/_[dpo]_/_/ig;
+	s/(\d+_)?\d+.?(mb|gb)//ig;
+	s/_+/_/g;
+	s/_$//;
+	$_.=".$ext" if $ext;
+	return $_;
+}
+sub tr_rename{
+	my($old,$tid)=@_;
+
+	if($old=~m#/#){
+		my @stack=split '/',$old;
+		for my $i(0..$#stack-1){
+			my $dir=join '/',@stack[0..$i];
+			state %renamed;
+			next if exists $renamed{$dir};
+			$renamed{$dir}++;
+			say ">> ",join '/',@stack[0..$i];
+			tr_rename($dir,$tid);
+		}
+		$old=~m#^(.*)/(.*?)$#;
+		my $f=$2;
+		#say Dumper [$old,replace($1),$f];
+		$old=replace($1)."/".$f;
+	}
+	my $new=replace($old);
+	return if $new eq $old;
+	$new=~s#.*/##;
+	
+	say "Rename $old to $new";
+	my $json=encode_json {
+		method=>"torrent-rename-path",
+		arguments=>{
+			ids=>[$tid],
+			path=>$old,
+			name=>$new
+		},
+	};
+	say Dumper $json;
+	say $ua->post(API,Content=>$json)->decoded_content;
+}
