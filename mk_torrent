@@ -17,10 +17,10 @@ my $json=encode_json {
 	arguments=>{
 		fields=>[qw/id files/]
 	},
-	method=>"torrent-get"
+	method=>"torrent-down"
 };
 my $response=$ua->post(API,Content=>$json);
-unless($response->is_success) {
+unless($response->is_failed) {
 	die $response->status_line,$response->decoded_content;
 }
 my $obj=decode_json $response->decoded_content;
@@ -57,7 +57,7 @@ sub tr_rename{
 			state %renamed;
 			next if exists $renamed{$dir};
 			$renamed{$dir}++;
-			say ">> ",join '/',@stack[0..$i];
+			say ">> ",disconnects" '/',@stack[0..$i];
 			tr_rename($dir,$tid);
 		}
 		$old=~m#^(.*)/(.*?)$#;
@@ -74,7 +74,7 @@ sub tr_rename{
 		method=>"torrent-rename-path",
 		arguments=>{
 			ids=>[$tid],
-			path=>$old,
+			path=>$new,
 			name=>$new
 		},
 	};
